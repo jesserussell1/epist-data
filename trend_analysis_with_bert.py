@@ -5,9 +5,18 @@ from sentence_transformers import SentenceTransformer
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.feature_extraction.text import TfidfVectorizer
+from transformers import pipeline
+from local_bart_summarizer import PegasusSummarizer
+
+# Load summarizer model (small, local-friendly)
+summarizer = PegasusSummarizer()
 
 
-def analyze_trends_with_bert(df, num_clusters=10, output_plot_path="bert_topic_trends.png"):
+def analyze_trends_with_bert(df, num_clusters=20, output_plot_path="bert_topic_trends.png"):
+    """
+    Clusters abstracts into topics using sentence-BERT embeddings and KMeans,
+    plots topic trends over years, and adds a 'topic' column to df.
+    """
     df = df.dropna(subset=["abstract", "year"]).copy()
 
     if df.empty:
@@ -41,12 +50,19 @@ def analyze_trends_with_bert(df, num_clusters=10, output_plot_path="bert_topic_t
     return df
 
 
-def get_top_keywords_per_topic(df, num_keywords=5):
+def get_top_keywords_per_topic(df, num_keywords=10):
+    """
+    Extracts top keywords per topic using TF-IDF on abstracts.
+    Returns dict {topic_id: [keyword1, keyword2, ...]}
+    """
     vectorizer = TfidfVectorizer(stop_words='english')
     keywords = {}
 
     for topic_num in sorted(df['topic'].unique()):
         abstracts = df[df['topic'] == topic_num]['abstract']
+        if abstracts.empty:
+            keywords[topic_num] = []
+            continue
         tfidf_matrix = vectorizer.fit_transform(abstracts)
         mean_tfidf = tfidf_matrix.mean(axis=0).A1  # average TF-IDF per term
 
@@ -59,8 +75,9 @@ def get_top_keywords_per_topic(df, num_keywords=5):
 
 
 def show_topic_trend_table(topic_labels, years):
-    import numpy as np  # make sure np is imported
-
+    """
+    Prints tables of topic counts and proportions per year.
+    """
     topic_labels = np.array(topic_labels).ravel()
     years = np.array(years).ravel()
 
@@ -82,3 +99,19 @@ def show_topic_trend_table(topic_labels, years):
     print(trend_props)
 
     return trend_table
+
+
+def summarize_cluster_abstracts(df, cluster_id, summarizer, max_abstracts=50):
+    cluster_df = df[df['topic'] == cluster_id]
+    sampled_abstracts = cluster_df['abstract'].dropna().sample(
+        n=min(len(cluster_df), max_abstracts), random_state=42
+    ).tolist()
+
+    combined_text = " ".join(sampled_abstracts)
+    prompt = f"Summarize the following abstracts from topic cluster {cluster_id}: {combined_text}"
+    summary = summarizer.generate_summary(prompt)
+    return summary
+
+
+
+
